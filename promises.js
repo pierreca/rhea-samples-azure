@@ -90,26 +90,34 @@ async function createReceiver(session, path, options) {
   });
 }
 
-async function fromConnectionString(connectionString) {
-  const parsed = connectionString.split(';').reduce((acc, part) => {
+function parseConnectionString(connectionString) {
+  return connectionString.split(';').reduce((acc, part) => {
     const splitIndex = part.indexOf('=');
     return {
       ...acc,
       [part.substring(0, splitIndex)]: part.substring(splitIndex + 1)
     };
   }, {});
+}
 
-  const queue = process.argv[3]
+async function fromConnectionString(connectionString, options) {
+  if (!options) options = {};
 
-  return await connect({
+  const parsed = parseConnectionString(connectionString);
+  const connectOptions = {
     transport: 'tls',
     host: url.parse(parsed.Endpoint).hostname,
     hostname: url.parse(parsed.Endpoint).hostname,
     username: parsed.SharedAccessKeyName,
-    password: parsed.SharedAccessKey,
     port: 5671,
     reconnect_limit: 100
-  });
+  };
+
+  if (!options.useSaslAnonymous) {
+    connectOptions.password = parsed.SharedAccessKey;
+  }
+
+  return await connect(connectOptions);
 }
 
 function trackSends(sender) {
@@ -151,4 +159,4 @@ function trackSends(sender) {
   };
 }
 
-module.exports = { connect, createSession, createSender, createReceiver, trackSends, fromConnectionString };
+module.exports = { connect, createSession, createSender, createReceiver, trackSends, fromConnectionString, parseConnectionString };
