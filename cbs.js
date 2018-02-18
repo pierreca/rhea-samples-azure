@@ -8,41 +8,16 @@ const connectionString = process.argv[2];
 
 const parsedCS = amqp.parseConnectionString(connectionString);
 const eventHubName = parsedCS.EntityPath || process.argv[3];
-const hostName = "testeh12.servicebus.windows.net";
 
-function messageHandler(result) {
-  console.log('result.message: ', result.message);
-  //console.dir(result.delivery, {depth: 2});
-  let bodyStr = result.message.body.toString();
-  console.log('received(' + myIdx + '): ', bodyStr);
-
-  try {
-    JSON.parse(bodyStr);
-  } catch (e) {
-    //console.log(e);
-  }
-  result.delivery.update(undefined, rhea.message.accepted().described());
-}
-
-function errorHandler(rx_err) {
-  console.warn('==> RX ERROR: ', rx_err);
-}
-
-function stringToSign(resourceUri, expiry) {
-  return resourceUri + '\n' + expiry;
-}
-
-function hmacHash(password, stringToSign) {
-  let hmac = crypto.createHmac('sha256', new Buffer(password, 'base64'));
-  hmac.update(stringToSign, 'utf8');
-  return hmac.digest('base64');
-}
+var connection;
 
 function createSasToken(resourceUri, keyName, key, expiry) {
   console.log('expiry being set to: ', new Date(expiry * 1000).toString());
   resourceUri = encodeURIComponent(resourceUri);
   keyName = encodeURIComponent(keyName);
-  let sig = encodeURIComponent(hmacHash(key, stringToSign(resourceUri, expiry)));
+  let stringToSign = resourceUri + '\n' + expiry;
+  let sig = encodeURIComponent(crypto.createHmac('sha256', key).update(stringToSign, 'utf8').digest('base64'));
+  console.log('#####sig: ', sig);
   let sasToken = `SharedAccessSignature sr=${resourceUri}&sig=${sig}&se=${expiry}&skn=${keyName}`;
   return sasToken;
 }
@@ -53,7 +28,7 @@ async function cbsAuth() {
     const replyTo = 'cbs';
     const resourceUri = `${parsedCS.Endpoint}${eventHubName}`;
     const audience = resourceUri;
-    const sasToken = createSasToken(resourceUri, parsedCS.SharedAccessKeyName, parsedCS.SharedAccessKey, parseInt((Date.now() + 3600000) / 1000).toString());
+    const sasToken = createSasToken(resourceUri, parsedCS.SharedAccessKeyName, parsedCS.SharedAccessKey, Math.floor((Date.now() + 3600000) / 1000).toString());
     console.log('sasToken: ', sasToken);
 
     const request = {
@@ -72,7 +47,7 @@ async function cbsAuth() {
     console.log('request: ', request);
     //const rxopt = { name: replyTo, target: { address: replyTo }};
 
-    const connection = await amqp.fromConnectionString(connectionString, { useSaslAnonymous: true });
+    connection = await amqp.fromConnectionString(connectionString, { useSaslAnonymous: true });
     console.log('connected');
 
     const session = await amqp.createSession(connection);
@@ -85,11 +60,9 @@ async function cbsAuth() {
     ]);
 
     receiver.on('message', ({ message, delivery }) => {
-      console.log('rx: ', message);
+      console.log('message: ', message);
       console.log('cbs response received');
-      //console.log(message.body.content.toString());
       delivery.update(undefined, rhea.message.accepted().described());
-      process.exit();
     });
 
     const delivery = sender.send(request);
@@ -98,10 +71,12 @@ async function cbsAuth() {
   }.bind(this));
 }
 
-cbsAuth().then((res) => {
-  console.log(res);
+async function run() {
+  await cbsAuth();
   process.exit();
-}).catch(err => {
+}
+
+run().catch(err => {
   console.error(err);
   console.log(err.stack);
   process.exit(1);
